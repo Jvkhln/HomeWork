@@ -23,9 +23,18 @@ export const StudentDashboard: React.FC = () => {
   const weekdayNum = getCurrentWeekday();
   const todayWeekdayObj = WEEKDAYS.find(w => w.id === weekdayNum);
 
-  // Find student record
-  const student = dataService.getStudents().find(s => s.studentId === currentUser?.studentId);
+  // Find student record (by studentId or username/studentCode)
+  const allStudents = dataService.getStudents();
+  const student = allStudents.find(s => 
+    s.studentId === currentUser?.studentId || 
+    s.studentCode.toLowerCase() === currentUser?.username.toLowerCase()
+  ) || allStudents[0];
   const classId = student ? student.classId : '10А';
+
+  // Find student's assigned group and group leader
+  const classGroups = dataService.getGroups(classId);
+  const myGroup = classGroups.find(g => g.groupId === student?.groupId) || classGroups[0];
+  const groupLeaderName = myGroup?.leaderName || 'Т. Болд-Эрдэнэ';
 
   const [selectedScheduleDay, setSelectedScheduleDay] = React.useState<number>(weekdayNum);
   const selectedWeekdayObj = WEEKDAYS.find(w => w.id === selectedScheduleDay);
@@ -38,6 +47,9 @@ export const StudentDashboard: React.FC = () => {
   const mySubmissions = dataService.getSubmissions(undefined, student?.studentId);
   const submissionMap = new Map(mySubmissions.map(s => [s.homeworkId, s]));
 
+  // Evaluation status filter
+  const [evalFilter, setEvalFilter] = React.useState<'ALL' | 'EXCELLENT' | 'AVERAGE' | 'NOT_DONE'>('ALL');
+
   // 3 evaluation counts: Маш сайн, Дунд, Хийгээгүй
   const totalAssigned = homeworkList.length;
   const excellentCount = mySubmissions.filter(s => s.status === 'EXCELLENT' || s.status === 'DONE').length;
@@ -48,6 +60,15 @@ export const StudentDashboard: React.FC = () => {
     ? Math.round(((excellentCount * 100 + averageCount * 70) / (totalAssigned * 100)) * 100)
     : 0;
 
+  const filteredHomework = homeworkList.filter(hw => {
+    if (evalFilter === 'ALL') return true;
+    const sub = submissionMap.get(hw.homeworkId);
+    let st = sub?.status || 'NOT_DONE';
+    if (st === 'DONE') st = 'EXCELLENT';
+    if (st === 'IN_PROGRESS' || st === 'LATE') st = 'AVERAGE';
+    return st === evalFilter;
+  });
+
   return (
     <div className="space-y-6 pb-12 animate-fadeIn">
       {/* Student Welcome Profile Banner */}
@@ -57,16 +78,22 @@ export const StudentDashboard: React.FC = () => {
             <GraduationCap className="w-8 h-8 text-white" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-xl font-bold tracking-tight">
                 {student?.fullName || currentUser?.displayName}
               </h2>
               <span className="px-2.5 py-0.5 rounded-full bg-white/20 text-xs font-semibold text-white">
                 {classId} анги
               </span>
+              <span className="px-2.5 py-0.5 rounded-full bg-emerald-400/25 text-xs font-bold text-emerald-100 border border-emerald-300/30">
+                🏷️ {student?.groupName || myGroup?.name || '1-р хэсэг'}
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full bg-amber-400/25 text-xs font-bold text-amber-100 border border-amber-300/30">
+                👑 Ахлагч: {groupLeaderName}
+              </span>
             </div>
-            <p className="text-xs text-blue-100 mt-1">
-              Сурагчийн хувийн код: <strong className="font-mono">{student?.studentCode}</strong> · Өнөөдөр: {today} ({todayWeekdayObj?.name || 'Өнөөдөр'})
+            <p className="text-xs text-blue-100 mt-1.5">
+              Сурагчийн код: <strong className="font-mono">{student?.studentCode}</strong> · Өнөөдөр: {today} ({todayWeekdayObj?.name || 'Өнөөдөр'})
             </p>
           </div>
         </div>
@@ -87,20 +114,34 @@ export const StudentDashboard: React.FC = () => {
         <BookCheck className="w-5 h-5 text-emerald-700 flex-shrink-0 mt-0.5" />
         <div className="leading-relaxed">
           <strong className="font-bold text-emerald-950 block mb-0.5">
-            Дэвтрийн шалгалтын зарчим (Сурагч илгээх шаардлагагүй):
+            Дэвтрийн шалгалтын зарчим (Сурагч цахимаар илгээх шаардлагагүй):
           </strong>
-          Сурагчид цахимаар файл эсвэл даалгавар илгээхгүй. Хэсгийн ахлагч ангидаа таны хичээлийн дэвтрийн гэрийн даалгаврын үйл ажиллагааг биечлэн шалгаад <strong>«Маш сайн»</strong>, <strong>«Дунд»</strong>, <strong>«Хийгээгүй»</strong> гэсэн 3 үнэлгээгээр бүртгэнэ. Багш шалгаж баталгаажуулна.
+          Сурагчид цахимаар файл эсвэл даалгавар илгээх шаардлагагүй. Хэсгийн ахлагч (<strong>{groupLeaderName}</strong>) ангидаа таны дэвтрийг биечлэн шалгаад <strong>«Маш сайн»</strong>, <strong>«Дунд»</strong>, <strong>«Хийгээгүй»</strong> гэсэн 3 үнэлгээгээр бүртгэх ба багш баталгаажуулна.
         </div>
       </div>
 
       {/* Progress Cards: 3 Evaluations */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-        <div className="bg-white p-4.5 rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md transition-all">
-          <span className="text-[11px] text-slate-400 font-semibold block">Нийт өгсөн даалгавар</span>
+        <div
+          onClick={() => setEvalFilter('ALL')}
+          className={`p-4.5 rounded-2xl border transition-all cursor-pointer ${
+            evalFilter === 'ALL'
+              ? 'bg-blue-50/50 border-blue-400 ring-2 ring-blue-200 shadow-sm'
+              : 'bg-white border-slate-200/90 hover:shadow-md'
+          }`}
+        >
+          <span className="text-[11px] text-slate-500 font-semibold block">Нийт өгсөн даалгавар</span>
           <span className="text-2xl font-black text-slate-900 mt-1 block">{totalAssigned}</span>
         </div>
 
-        <div className="bg-white p-4.5 rounded-2xl border border-emerald-200 bg-emerald-50/20 shadow-xs hover:shadow-md transition-all">
+        <div
+          onClick={() => setEvalFilter('EXCELLENT')}
+          className={`p-4.5 rounded-2xl border transition-all cursor-pointer ${
+            evalFilter === 'EXCELLENT'
+              ? 'bg-emerald-100/60 border-emerald-500 ring-2 ring-emerald-300 shadow-sm'
+              : 'bg-white border-emerald-200 bg-emerald-50/20 hover:shadow-md'
+          }`}
+        >
           <span className="text-[11px] text-emerald-700 font-bold block flex items-center gap-1">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
             Маш сайн
@@ -108,7 +149,14 @@ export const StudentDashboard: React.FC = () => {
           <span className="text-2xl font-black text-emerald-600 mt-1 block">{excellentCount}</span>
         </div>
 
-        <div className="bg-white p-4.5 rounded-2xl border border-amber-200 bg-amber-50/20 shadow-xs hover:shadow-md transition-all">
+        <div
+          onClick={() => setEvalFilter('AVERAGE')}
+          className={`p-4.5 rounded-2xl border transition-all cursor-pointer ${
+            evalFilter === 'AVERAGE'
+              ? 'bg-amber-100/60 border-amber-500 ring-2 ring-amber-300 shadow-sm'
+              : 'bg-white border-amber-200 bg-amber-50/20 hover:shadow-md'
+          }`}
+        >
           <span className="text-[11px] text-amber-700 font-bold block flex items-center gap-1">
             <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
             Дунд
@@ -116,7 +164,14 @@ export const StudentDashboard: React.FC = () => {
           <span className="text-2xl font-black text-amber-600 mt-1 block">{averageCount}</span>
         </div>
 
-        <div className="bg-white p-4.5 rounded-2xl border border-rose-200 bg-rose-50/20 shadow-xs hover:shadow-md transition-all">
+        <div
+          onClick={() => setEvalFilter('NOT_DONE')}
+          className={`p-4.5 rounded-2xl border transition-all cursor-pointer ${
+            evalFilter === 'NOT_DONE'
+              ? 'bg-rose-100/60 border-rose-500 ring-2 ring-rose-300 shadow-sm'
+              : 'bg-white border-rose-200 bg-rose-50/20 hover:shadow-md'
+          }`}
+        >
           <span className="text-[11px] text-rose-700 font-bold block flex items-center gap-1">
             <XCircle className="w-3.5 h-3.5 text-rose-600" />
             Хийгээгүй
@@ -130,25 +185,40 @@ export const StudentDashboard: React.FC = () => {
         {/* Left Column: My Homework List (Span 2) */}
         <div className="lg:col-span-2 space-y-4">
           <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-5">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200 mb-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 mb-4">
               <div className="flex items-center gap-2">
                 <BookOpen className="w-5 h-5 text-blue-600" />
                 <h3 className="font-bold text-slate-900 text-sm">
-                  Хичээлүүдийн дэвтрийн үнэлгээ ({homeworkList.length})
+                  Хичээлүүдийн дэвтрийн үнэлгээ ({filteredHomework.length})
                 </h3>
               </div>
-              <span className="text-xs text-slate-400">
-                Хэсгийн ахлагчийн шалгасан үнэлгээ
-              </span>
+              {/* Filter pills */}
+              <div className="flex items-center gap-1.5 text-xs">
+                {(['ALL', 'EXCELLENT', 'AVERAGE', 'NOT_DONE'] as const).map(f => (
+                  <button
+                    key={f}
+                    onClick={() => setEvalFilter(f)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all border ${
+                      evalFilter === f
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {f === 'ALL' ? 'Бүгд' : SUBMISSION_STATUS_LABELS[f]}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="space-y-3.5">
-              {homeworkList.length === 0 ? (
+              {filteredHomework.length === 0 ? (
                 <div className="py-12 text-center text-slate-400 text-xs">
-                  Одоогоор бүртгэгдсэн дэвтрийн шалгалт байхгүй байна. Хичээл дээр хэсгийн ахлагч шалгаж бүртгэхэд энд харагдана.
+                  {evalFilter === 'ALL'
+                    ? 'Одоогоор бүртгэгдсэн дэвтрийн шалгалт байхгүй байна. Хичээл дээр хэсгийн ахлагч шалгаж бүртгэхэд энд харагдана.'
+                    : `«${SUBMISSION_STATUS_LABELS[evalFilter]}» үнэлгээтэй даалгавар олдсонгүй.`}
                 </div>
               ) : (
-                homeworkList.map((hw, idx) => {
+                filteredHomework.map((hw, idx) => {
                   const sub = submissionMap.get(hw.homeworkId);
                   let rawStatus = sub?.status || 'NOT_DONE';
                   if (rawStatus === 'DONE') rawStatus = 'EXCELLENT';
@@ -196,8 +266,8 @@ export const StudentDashboard: React.FC = () => {
                               ✓ Багш баталгаажуулсан
                             </span>
                           ) : sub?.submittedAt ? (
-                            <span className="text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
-                              Ахлагч шалгасан
+                            <span className="text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-medium">
+                              👑 Хэсгийн ахлагч ({groupLeaderName}) шалгасан
                             </span>
                           ) : (
                             <span className="text-slate-400 italic">
@@ -206,6 +276,16 @@ export const StudentDashboard: React.FC = () => {
                           )}
                         </div>
                       </div>
+
+                      {/* Leader's feedback note if provided */}
+                      {sub?.leaderComment && (
+                        <div className="mt-2 p-2.5 bg-emerald-50/80 border border-emerald-200 rounded-lg text-[11px] flex items-start gap-2 text-emerald-950">
+                          <BookCheck className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                          <div>
+                            <strong>Хэсгийн ахлагчийн тэмдэглэл / үнэлгээ:</strong> {sub.leaderComment}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Teacher's Feedback comment if available */}
                       {sub?.teacherComment && (

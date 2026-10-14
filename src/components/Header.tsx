@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
-import { BookOpen, LogOut, UserCircle, ShieldCheck, UserCheck, GraduationCap } from 'lucide-react';
+import { BookOpen, LogOut, UserCircle } from 'lucide-react';
 
 interface HeaderProps {
   onOpenAuthModal: () => void;
@@ -10,7 +10,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   onOpenAuthModal,
 }) => {
-  const { currentUser, logout, switchRoleQuick } = useAuth();
+  const { currentUser, logout } = useAuth();
 
   return (
     <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs">
@@ -34,44 +34,6 @@ export const Header: React.FC<HeaderProps> = ({
                 Сургуулийн гэрийн даалгаврын гүйцэтгэл хяналт, тайлангийн систем
               </p>
             </div>
-          </div>
-
-          {/* Center: Quick Role Switcher for seamless testing */}
-          <div className="hidden lg:flex items-center gap-1.5 p-1 bg-slate-100/90 rounded-xl text-xs border border-slate-200/60">
-            <span className="text-[11px] text-slate-400 px-2.5 font-bold uppercase tracking-wider">Эрх:</span>
-            <button
-              onClick={() => switchRoleQuick('TEACHER')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all ${
-                currentUser?.role === 'TEACHER'
-                  ? 'bg-white text-blue-700 font-bold shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 font-medium'
-              }`}
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
-              Багш
-            </button>
-            <button
-              onClick={() => switchRoleQuick('LEADER')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all ${
-                currentUser?.role === 'LEADER'
-                  ? 'bg-white text-emerald-700 font-bold shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 font-medium'
-              }`}
-            >
-              <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
-              Ахлагч
-            </button>
-            <button
-              onClick={() => switchRoleQuick('STUDENT')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all ${
-                currentUser?.role === 'STUDENT'
-                  ? 'bg-white text-indigo-700 font-bold shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 font-medium'
-              }`}
-            >
-              <GraduationCap className="w-3.5 h-3.5 text-indigo-600" />
-              Сурагч
-            </button>
           </div>
 
           {/* Right Action buttons */}

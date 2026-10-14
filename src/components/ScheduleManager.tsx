@@ -350,20 +350,20 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({ classId }) => 
                 onClick={handlePullScheduleFromSheet}
                 disabled={isSyncingSheet}
                 className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl shadow-2xs transition-colors disabled:opacity-50"
-                title="Google Sheet-ээс хуваарь татах"
+                title="Хүснэгтээс хуваарь татах"
               >
                 <ArrowDownToLine className={`w-3.5 h-3.5 ${isSyncingSheet ? 'animate-bounce' : 'text-blue-600'}`} />
-                <span className="hidden sm:inline">Sheet-ээс татах</span>
+                <span className="hidden sm:inline">Хүснэгтээс татах</span>
               </button>
 
               <button
                 onClick={handlePushScheduleToSheet}
                 disabled={isSyncingSheet}
                 className="flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-xs rounded-xl shadow-2xs transition-colors disabled:opacity-50"
-                title="Одоогийн хуваарийг Google Sheet рүү синк хийх"
+                title="Одоогийн хуваарийг Хүснэгтэд хадгалах"
               >
                 <CloudUpload className={`w-3.5 h-3.5 ${isSyncingSheet ? 'animate-pulse' : 'text-emerald-600'}`} />
-                <span className="hidden sm:inline">Sheet рүү синк</span>
+                <span className="hidden sm:inline">Хүснэгтэд хадгалах</span>
               </button>
             </div>
 

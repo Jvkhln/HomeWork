@@ -191,7 +191,7 @@ export const PublicLanding: React.FC<PublicLandingProps> = ({ onOpenLogin }) => 
               Сурагч / Багш нэвтрэх
             </h4>
             <p className="text-xs text-blue-200/90 mt-1 line-clamp-2">
-              Хэсгийн ахлагч, багш, сурагчийн эрхээр системд шуурхай нэвтрэх
+              Хэсгийн ахлагч, багш, сурагчийн эрхээр системд нэвтрэх
             </p>
           </div>
           <div className="mt-4 pt-3 border-t border-white/10 flex items-center text-xs font-semibold text-blue-200 group-hover:text-white group-hover:translate-x-1 transition-all">

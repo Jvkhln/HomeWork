@@ -18,7 +18,8 @@ import {
   Edit,
   History,
   FileSpreadsheet,
-  RefreshCw
+  RefreshCw,
+  Info
 } from 'lucide-react';
 import { dataService } from '../services/dataService';
 import { useAuth } from '../context/AuthContext';
@@ -38,11 +39,15 @@ export const TeacherDashboard: React.FC = () => {
   const { currentUser, showToast } = useAuth();
 
   // Navigation tab
-  const [activeTab, setActiveTab] = useState<'overview' | 'homework' | 'reviews' | 'students' | 'schedule' | 'reports' | 'audit'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'homework' | 'reviews' | 'groups' | 'students' | 'schedule' | 'reports' | 'audit'>('overview');
 
   // Filters
   const [selectedClass, setSelectedClass] = useState<string>('ALL');
   const [timeframe, setTimeframe] = useState<'WEEK' | 'MONTH' | 'ALL'>('WEEK');
+
+  // Class Groups state (1 to 5 groups)
+  const [targetGroupClass, setTargetGroupClass] = useState<string>('10А');
+  const [selectedGroupCount, setSelectedGroupCount] = useState<number>(3);
 
   // Modal controls
   const [isHomeworkModalOpen, setIsHomeworkModalOpen] = useState(false);
@@ -164,6 +169,36 @@ export const TeacherDashboard: React.FC = () => {
       hw.subjectName.toLowerCase().includes(term)
     );
   });
+
+  const targetClassStudents = dataService.getStudents(targetGroupClass).filter(s => s.active);
+  const classGroups = dataService.getGroups(targetGroupClass);
+  const allUsers = dataService.getUsers();
+
+  const handleSplitGroups = () => {
+    if (!currentUser) return;
+    dataService.splitClassIntoGroups(currentUser, targetGroupClass, selectedGroupCount);
+    setRefreshTrigger(prev => prev + 1);
+    showToast(
+      'success',
+      'Амжилттай хуваариллаа',
+      `${targetGroupClass} ангийн ${targetClassStudents.length} сурагчийг ${selectedGroupCount} хэсэгт хувааж, хэсэг бүрт ахлагч томиллоо.`
+    );
+  };
+
+  const handleSetLeader = (groupId: string, studentId: string) => {
+    if (!currentUser) return;
+    dataService.setGroupLeader(currentUser, targetGroupClass, groupId, studentId);
+    setRefreshTrigger(prev => prev + 1);
+    const st = targetClassStudents.find(s => s.studentId === studentId);
+    showToast('success', 'Хэсгийн ахлагч томилогдлоо', `${st?.fullName || 'Сурагч'} тус хэсгийн ахлагчаар томилогдлоо.`);
+  };
+
+  const handleMoveStudent = (studentId: string, targetGroupId: string) => {
+    if (!currentUser) return;
+    dataService.moveStudentToGroup(currentUser, studentId, targetGroupId);
+    setRefreshTrigger(prev => prev + 1);
+    showToast('info', 'Сурагчийг шилжүүллээ', 'Сурагчийн харьяалагдах хэсэг шинэчлэгдлээ.');
+  };
 
   const handleToggleStudent = (studentId: string) => {
     if (!currentUser) return;
@@ -320,6 +355,18 @@ export const TeacherDashboard: React.FC = () => {
         </button>
 
         <button
+          onClick={() => setActiveTab('groups')}
+          className={`px-4 py-2 font-semibold rounded-lg flex items-center gap-2 whitespace-nowrap transition-colors ${
+            activeTab === 'groups'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          Ангийн хэсэг & Ахлагчид (1-5 хэсэг)
+        </button>
+
+        <button
           onClick={() => setActiveTab('students')}
           className={`px-4 py-2 font-semibold rounded-lg flex items-center gap-2 whitespace-nowrap transition-colors ${
             activeTab === 'students'
@@ -364,7 +411,7 @@ export const TeacherDashboard: React.FC = () => {
           }`}
         >
           <History className="w-4 h-4" />
-          AuditLog
+          Үйлдлийн түүх
         </button>
       </div>
 
@@ -736,6 +783,212 @@ export const TeacherDashboard: React.FC = () => {
         </div>
       )}
 
+      {/* TAB: CLASS GROUPS & LEADERS (1 to 5 groups) */}
+      {activeTab === 'groups' && (
+        <div className="space-y-6 animate-fadeIn">
+          {/* Group Division Control Card */}
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-6 space-y-4">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="p-2 rounded-xl bg-blue-50 text-blue-700">
+                    <Users className="w-5 h-5 text-blue-600" />
+                  </span>
+                  <h3 className="font-bold text-slate-900 text-base">
+                    Ангийн сурагчдыг хэсэгт хуваах & Ахлагч томилох
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                  Ангийн багш ангийн нийт сурагчдыг 1-ээс 5 хүртэлх хэсэгт хуваах ба хэсэг дотроо хариуцсан ахлагчтай байна. Ахлагч нар хариуцсан хэсгийнхээ гэрийн даалгаврыг шалгаж үнэлгээ хийнэ.
+                </p>
+              </div>
+
+              {/* Class Selector */}
+              <div className="flex items-center gap-2 self-start md:self-auto">
+                <span className="text-xs font-semibold text-slate-600">Сонгосон анги:</span>
+                <select
+                  value={targetGroupClass}
+                  onChange={(e) => setTargetGroupClass(e.target.value)}
+                  className="px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-800 rounded-xl text-xs font-bold cursor-pointer transition-colors"
+                >
+                  {classes.map(c => (
+                    <option key={c} value={c}>{c} анги</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Split controls */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/70 p-4 rounded-xl border border-slate-200/80">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-xs font-bold text-slate-700">
+                  Хэсгийн тоо (1-ээс 5 хүртэл):
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {[1, 2, 3, 4, 5].map(cnt => (
+                    <button
+                      key={cnt}
+                      type="button"
+                      onClick={() => setSelectedGroupCount(cnt)}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                        selectedGroupCount === cnt
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs ring-2 ring-blue-300'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {cnt} хэсэг
+                    </button>
+                  ))}
+                </div>
+                <span className="text-[11px] text-slate-500 font-medium ml-1">
+                  ({targetClassStudents.length} сурагч, хэсэг бүрт дунджаар {Math.max(1, Math.round(targetClassStudents.length / selectedGroupCount))} сурагч)
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSplitGroups}
+                className="flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-xs hover:shadow-md transition-all active:scale-95"
+              >
+                <Users className="w-4 h-4" />
+                <span>Сурагчдыг {selectedGroupCount} хэсэгт хувааж ахлагч томилох</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Groups Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {classGroups.map(grp => {
+              const grpStudents = targetClassStudents.filter(s => s.groupId === grp.groupId);
+              const leader = grpStudents.find(s => s.isLeader) || grpStudents.find(s => s.studentId === grp.leaderStudentId);
+              const leaderUser = allUsers.find(u => u.studentId === leader?.studentId);
+
+              return (
+                <div
+                  key={grp.groupId}
+                  className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden flex flex-col justify-between hover:border-blue-300 transition-all"
+                >
+                  <div>
+                    {/* Group Header */}
+                    <div className="p-4 bg-slate-50 border-b border-slate-200/80 flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-lg bg-blue-600 text-white font-black text-xs flex items-center justify-center shadow-xs">
+                          {grp.groupNumber}
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-slate-900 text-sm">{grp.name}</h4>
+                          <span className="text-[11px] text-slate-500">{grpStudents.length} сурагч</span>
+                        </div>
+                      </div>
+                      <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+                        {grp.groupNumber}-р хэсэг
+                      </span>
+                    </div>
+
+                    {/* Assigned Leader Box */}
+                    <div className="p-3.5 bg-amber-50/70 border-b border-amber-100 flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-amber-900 flex items-center gap-1 uppercase tracking-wider">
+                          <span>👑</span> Хэсгийн ахлагч:
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <label className="text-[10px] text-slate-500 font-semibold">Солих:</label>
+                          <select
+                            value={leader?.studentId || ''}
+                            onChange={(e) => handleSetLeader(grp.groupId, e.target.value)}
+                            className="text-[11px] font-semibold bg-white border border-amber-300 rounded px-2 py-0.5 text-slate-800"
+                          >
+                            {grpStudents.map(s => (
+                              <option key={s.studentId} value={s.studentId}>
+                                {s.fullName} ({s.studentCode})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="bg-white p-2.5 rounded-xl border border-amber-200/80 shadow-2xs">
+                        <div className="font-bold text-xs text-slate-900">
+                          {leader?.fullName || grp.leaderName || 'Томилогдоогүй'}
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] text-slate-500 mt-1">
+                          <span>Сурагчийн код: <strong className="font-mono text-slate-700">{leader?.studentCode || '-'}</strong></span>
+                          <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 text-[10px]">
+                            👑 Хэсгийн ахлагч
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Students inside Group */}
+                    <div className="p-4 space-y-2">
+                      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                        Хэсгийн сурагчид ({grpStudents.length}):
+                      </label>
+                      <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                        {grpStudents.map(st => (
+                          <div
+                            key={st.studentId}
+                            className="p-2 rounded-lg border border-slate-100 hover:border-slate-200 bg-slate-50/50 flex items-center justify-between text-xs transition-colors"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-[11px] text-slate-400 w-14">{st.studentCode}</span>
+                              <span className="font-semibold text-slate-800">{st.fullName}</span>
+                              {st.isLeader && (
+                                <span className="text-[10px] font-bold text-amber-700 bg-amber-100/70 px-1.5 py-0.2 rounded">
+                                  👑 Ахлагч
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Move student to other group */}
+                            {classGroups.length > 1 && (
+                              <select
+                                value={grp.groupId}
+                                onChange={(e) => handleMoveStudent(st.studentId, e.target.value)}
+                                title="Өөр хэсэг рүү шилжүүлэх"
+                                className="text-[10px] text-slate-500 bg-white border border-slate-200 rounded px-1.5 py-0.5"
+                              >
+                                {classGroups.map(targetGrp => (
+                                  <option key={targetGrp.groupId} value={targetGrp.groupId}>
+                                    Шилжүүлэх: {targetGrp.name}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card footer */}
+                  <div className="p-3 bg-slate-50 border-t border-slate-100 text-[11px] text-slate-500 flex items-center justify-between">
+                    <span>{grp.name} · {targetGroupClass} анги</span>
+                    <span className="text-emerald-700 font-semibold">✓ Ахлагч гэрийн даалгавар шалгана</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Helper Callout */}
+          <div className="bg-blue-50/80 border border-blue-200/80 rounded-2xl p-4.5 text-xs text-blue-900 flex items-start gap-3">
+            <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <strong className="font-bold text-blue-950 block">
+                Хэсэг ба Ахлагчийн системд нэвтрэх ба ажиллах заавар:
+              </strong>
+              <ul className="list-disc list-inside space-y-1 text-blue-900">
+                <li><strong>Ахлагч өөрийн нэр нууц үгээр ороход:</strong> Зөвхөн өөрийн хариуцсан хэсгийн сурагчдын нэрс харагдаж, хичээлийн дэвтрийг шалган «Маш сайн», «Дунд», «Хийгээгүй» үнэлгээ болон тэмдэглэл хийнэ.</li>
+                <li><strong>Сурагч өөрийн нэр нууц үгээр ороход:</strong> Өөрийн харьяалагдах хэсэг ба хэсгийн ахлагчийн хийсэн үнэлгээ, багшийн санал дүгнэлт шууд харагдана.</li>
+                <li><strong>Хэрэглэгчдийн туршилтын нийтлэг нууц үг:</strong> <code className="bg-blue-100 px-1 py-0.5 rounded text-blue-800 font-mono">password123</code> (Нэвтрэх нэрээр сурагчийн хувийн код e.g. 10A-01, 10A-02 гэх мэтээр шууд орж болно).</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* TAB 4: STUDENTS & LEADERS */}
       {activeTab === 'students' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-5 space-y-4 animate-fadeIn">
@@ -799,14 +1052,20 @@ export const TeacherDashboard: React.FC = () => {
                       <td className="py-2.5 px-4">{student.classId}</td>
                       <td className="py-2.5 px-4 text-slate-600">{student.publicDisplayName}</td>
                       <td className="py-2.5 px-4">
-                        {isLeader ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            <UserCheck className="w-3 h-3" />
-                            Хэсгийн ахлагч
-                          </span>
-                        ) : (
-                          <span className="text-slate-500">Сурагч</span>
-                        )}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {student.groupName && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                              {student.groupName}
+                            </span>
+                          )}
+                          {isLeader ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                              👑 Хэсгийн ахлагч
+                            </span>
+                          ) : (
+                            <span className="text-slate-500 text-[11px]">Сурагч</span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-2.5 px-4">
                         <button

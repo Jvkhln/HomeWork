@@ -296,10 +296,45 @@ class DataService {
       }
     }
 
-    // Check against users (either from Google Sheet or demo initial users)
-    const user = this.state.users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.active);
+    // Check against users (either by username or by studentCode)
+    const cleanUsername = username.trim().toLowerCase();
+    let user = this.state.users.find(u => u.username.toLowerCase() === cleanUsername && u.active);
+
     if (!user) {
-      return { success: false, error: `"${username}" нэвтрэх нэртэй хэрэглэгч олдсонгүй.` };
+      // Check if username is a studentCode (e.g. 10A-01, 10a-02, etc.)
+      const student = this.state.students.find(s => s.studentCode.toLowerCase() === cleanUsername && s.active);
+      if (student) {
+        user = this.state.users.find(u => u.studentId === student.studentId && u.active);
+        if (!user) {
+          const isLeader = !!student.isLeader;
+          user = {
+            userId: 'u_' + student.studentCode.toLowerCase().replace(/[^a-z0-9]/g, '_'),
+            username: student.studentCode.toLowerCase(),
+            passwordHash: '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918',
+            role: isLeader ? 'LEADER' : 'STUDENT',
+            studentId: student.studentId,
+            active: true,
+            displayName: `${student.fullName} (${isLeader ? (student.groupName ? `${student.groupName} Ахлагч` : 'Хэсгийн ахлагч') : 'Сурагч'})`,
+            createdAt: new Date().toISOString()
+          };
+          this.state.users.push(user);
+          this.saveState();
+        }
+      }
+    }
+
+    if (!user) {
+      return { success: false, error: `"${username}" нэвтрэх нэр эсвэл сурагчийн кодтой хэрэглэгч олдсонгүй.` };
+    }
+
+    // Keep user's role and student info in sync with current student record
+    if (user.studentId) {
+      const student = this.state.students.find(s => s.studentId === user.studentId);
+      if (student) {
+        const isLeader = !!student.isLeader;
+        user.role = isLeader ? 'LEADER' : 'STUDENT';
+        user.displayName = `${student.fullName} (${isLeader ? (student.groupName ? `${student.groupName} Ахлагч` : 'Хэсгийн ахлагч') : 'Сурагч'})`;
+      }
     }
 
     // Password validation: match sheet password, or default demo password
@@ -945,13 +980,13 @@ class DataService {
     let classGroups = this.state.groups.filter(g => g.classId === classId);
     if (classGroups.length === 0) {
       // Auto-initialize standard 3 groups if not already created
-      classGroups = this.splitClassIntoGroups({ userId: 'system', displayName: 'Систем', role: 'TEACHER', active: true, createdAt: '' }, classId, 3);
+      classGroups = this.splitClassIntoGroups({ userId: 'system', username: 'system', displayName: 'Систем', role: 'TEACHER', active: true, createdAt: '' }, classId, 3);
     }
     return classGroups.sort((a, b) => a.groupNumber - b.groupNumber);
   }
 
   public splitClassIntoGroups(actor: User, classId: string, groupCount: number): ClassGroup[] {
-    const validCount = Math.max(2, Math.min(5, groupCount));
+    const validCount = Math.max(1, Math.min(5, groupCount));
     const activeStudents = this.state.students.filter(s => s.classId === classId && s.active);
 
     const GROUP_COLORS = ['blue', 'emerald', 'amber', 'purple', 'rose'];
@@ -978,18 +1013,22 @@ class DataService {
       student.groupName = targetGroup.name;
     });
 
-    // 3. For each group, assign or preserve a leader
+    // 3. For each group, assign a leader and provision accounts
     newGroups.forEach(grp => {
       const groupStudents = activeStudents.filter(s => s.groupId === grp.groupId);
       // Check if existing leader is in this group
       let leaderStudent = groupStudents.find(s => s.isLeader);
       if (!leaderStudent && groupStudents.length > 0) {
-        // Pick the first student as group leader
         leaderStudent = groupStudents[0];
-        leaderStudent.isLeader = true;
       }
 
+      // Mark leader vs non-leader
+      groupStudents.forEach(s => {
+        s.isLeader = (leaderStudent && s.studentId === leaderStudent.studentId) || false;
+      });
+
       if (leaderStudent) {
+        leaderStudent.isLeader = true;
         grp.leaderStudentId = leaderStudent.studentId;
         grp.leaderName = leaderStudent.fullName;
 
@@ -1033,6 +1072,29 @@ class DataService {
           });
         }
       }
+
+      // Also ensure normal student user accounts exist so any student can log in
+      groupStudents.forEach(st => {
+        if (!st.isLeader) {
+          let stUser = this.state.users.find(u => u.studentId === st.studentId);
+          if (!stUser) {
+            stUser = {
+              userId: 'u_' + st.studentCode.toLowerCase().replace(/[^a-z0-9]/g, '_'),
+              username: st.studentCode.toLowerCase(),
+              passwordHash: '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918',
+              role: 'STUDENT',
+              studentId: st.studentId,
+              active: true,
+              displayName: `${st.fullName} (${grp.name} Сурагч)`,
+              createdAt: new Date().toISOString()
+            };
+            this.state.users.push(stUser);
+          } else if (stUser.role === 'LEADER') {
+            stUser.role = 'STUDENT';
+            stUser.displayName = `${st.fullName} (${grp.name} Сурагч)`;
+          }
+        }
+      });
     });
 
     // Remove old groups for this class and save new ones

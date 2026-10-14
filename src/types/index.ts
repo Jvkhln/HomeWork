@@ -111,6 +111,7 @@ export interface Submission {
   checkedBy?: string;     // teacher userId
   checkedAt?: string;
   teacherComment?: string;
+  leaderComment?: string;
   studentNote?: string;
   studentAttachmentUrl?: string;
   updatedAt: string;

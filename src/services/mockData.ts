@@ -24,17 +24,17 @@ export const INITIAL_USERS: User[] = [
   },
   {
     userId: 'u_leader1',
-    username: 'leader_bold',
+    username: '10a-01',
     passwordHash: '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918',
     role: 'LEADER',
     studentId: 'std_01',
     active: true,
-    displayName: 'Т. Болд-Эрдэнэ (10А Ахлагч)',
+    displayName: 'Т. Болд-Эрдэнэ (1-р хэсгийн ахлагч)',
     createdAt: '2026-01-15T08:00:00Z',
   },
   {
     userId: 'u_student1',
-    username: 'student_bat',
+    username: '10a-02',
     passwordHash: '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918',
     role: 'STUDENT',
     studentId: 'std_02',
@@ -44,7 +44,7 @@ export const INITIAL_USERS: User[] = [
   },
   {
     userId: 'u_student2',
-    username: 'student_anujin',
+    username: '10a-03',
     passwordHash: '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918',
     role: 'STUDENT',
     studentId: 'std_03',
@@ -227,8 +227,8 @@ export const INITIAL_HOMEWORK: Homework[] = [
     classId: '10А',
     subjectId: 'sub_eng',
     subjectName: 'Англи хэл',
-    title: 'Unit 5 Essay: Climate Solutions',
-    description: 'Write a 150-word essay proposing practical renewable energy solutions for cities.',
+    title: '5-р бүлэг: Байгаль орчны эсээ',
+    description: 'Цэвэр эрчим хүч, хотын ногоон шийдлийн талаар 150 үгтэй эсээ дэвтэртээ бичих.',
     assignedDate: today,
     dueDate: today,
     createdBy: 'u_teacher1',
@@ -438,7 +438,7 @@ export const INITIAL_SUBMISSIONS: Submission[] = [
     submittedAt: `${today}T15:20:00Z`,
     checkedBy: 'u_teacher1',
     checkedAt: `${today}T18:05:00Z`,
-    teacherComment: 'Excellent essay!',
+    teacherComment: 'Маш сайн бичсэн байна!',
     updatedAt: `${today}T18:05:00Z`
   },
   {
@@ -449,7 +449,7 @@ export const INITIAL_SUBMISSIONS: Submission[] = [
     submittedAt: `${today}T16:50:00Z`,
     checkedBy: 'u_teacher1',
     checkedAt: `${today}T18:10:00Z`,
-    teacherComment: 'Good job.',
+    teacherComment: 'Сайн байна.',
     updatedAt: `${today}T18:10:00Z`
   }
 ];
