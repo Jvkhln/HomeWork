@@ -542,13 +542,13 @@ class DataService {
    * Push progress to Google Sheets in the background when an OAuth session is
    * available. Local work is retained if Google is disconnected or unavailable.
    */
-  private async syncSubmissionProgressToSheet(): Promise<void> {
+  private async syncSubmissionProgressToSheet(submissions: Submission[] = this.state.submissions): Promise<void> {
     const sheetId = this.state.settings.sheetId;
     if (!sheetId) return;
     try {
       const token = await getAccessToken();
       if (!token) return;
-      await syncSubmissionsToSheet(sheetId, token, this.state.submissions);
+      await syncSubmissionsToSheet(sheetId, token, submissions);
       this.state.settings.lastSyncAt = new Date().toISOString();
       this.saveState();
     } catch (error) {
@@ -858,7 +858,7 @@ class DataService {
       `${submissions.length} сурагчийн даалгаврын гүйцэтгэлийг бүртгэв.`
     );
     this.saveState();
-    void this.syncSubmissionProgressToSheet();
+    void this.syncSubmissionProgressToSheet(submissions);
   }
 
   public mergeSubmissionsFromSheet(sheetSubmissions: Submission[]): number {
@@ -904,7 +904,7 @@ class DataService {
       `Багш даалгаврыг шалгаж, төлөвийг "${status}" болголоо.`
     );
     this.saveState();
-    void this.syncSubmissionProgressToSheet();
+    void this.syncSubmissionProgressToSheet([sub]);
     return true;
   }
 
@@ -948,7 +948,7 @@ class DataService {
       'Сурагч даалгавраа багшид шалгуулахаар илгээв.'
     );
     this.saveState();
-    void this.syncSubmissionProgressToSheet();
+    void this.syncSubmissionProgressToSheet([submission]);
     return submission;
   }
 
