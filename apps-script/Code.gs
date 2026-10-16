@@ -433,10 +433,22 @@ function initAllSheets() {
     if (!sheet) {
       sheet = ss.insertSheet(name);
     }
-    // Хэрэв хоосон бол гарчгийг бичнэ
+    // Хоосон хүснэгтэд гарчиг бичих; хуучин хүснэгтэд шинэ багануудыг
+    // өгөгдөлд хүрэлгүйгээр баруун талд нэмж schema-г урагш нийцүүлэх.
     if (sheet.getLastRow() === 0) {
       sheet.appendRow(SCHEMAS[name]);
       sheet.getRange(1, 1, 1, SCHEMAS[name].length).setFontWeight('bold').setBackground('#f1f5f9');
+    } else {
+      var currentHeaders = sheet.getRange(1, 1, 1, Math.max(1, sheet.getLastColumn())).getValues()[0]
+        .map(function(value) { return String(value || '').trim(); });
+      var missingHeaders = SCHEMAS[name].filter(function(header) {
+        return currentHeaders.indexOf(header) === -1;
+      });
+      if (missingHeaders.length > 0) {
+        var firstNewColumn = sheet.getLastColumn() + 1;
+        sheet.getRange(1, firstNewColumn, 1, missingHeaders.length).setValues([missingHeaders]);
+        sheet.getRange(1, firstNewColumn, 1, missingHeaders.length).setFontWeight('bold').setBackground('#f1f5f9');
+      }
     }
   }
 }
