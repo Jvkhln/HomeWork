@@ -174,6 +174,32 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({ isOpen, on
     }
   };
 
+  // Keep the open integration panel refreshed from Sheets. Outbound writes
+  // are triggered by submission mutations in dataService.
+  useEffect(() => {
+    if (!isOpen || !googleToken || !sheetId.trim()) return;
+
+    const timer = window.setInterval(async () => {
+      try {
+        const parsed = await readFilledDataFromSheet(sheetId.trim(), googleToken);
+        dataService.importFromGoogleSheet({
+          users: parsed.users,
+          students: parsed.students,
+          schedule: parsed.schedule,
+          homework: parsed.homework,
+          submissions: parsed.submissions,
+          sheetId: sheetId.trim()
+        });
+        refreshUserData();
+      } catch (err) {
+        // A transient network/auth failure should not interrupt local work.
+        console.warn('Automatic Google Sheets refresh failed.', err);
+      }
+    }, 30000);
+
+    return () => window.clearInterval(timer);
+  }, [isOpen, googleToken, sheetId, refreshUserData]);
+
   // Verify data in the spreadsheet
   const handleVerifyData = async () => {
     if (!googleToken) {
