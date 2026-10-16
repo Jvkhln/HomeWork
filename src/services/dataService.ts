@@ -24,6 +24,8 @@ import {
   INITIAL_AUDIT_LOGS
 } from './mockData';
 import { getTodayUlaanbaatar } from '../utils/dateUtils';
+import { getAccessToken } from './googleAuth';
+import { syncSubmissionsToSheet } from './googleSheetsApi';
 
 const STORAGE_KEY = 'homework_app_state_v1';
 
@@ -198,6 +200,7 @@ class DataService {
     students?: Student[];
     schedule?: ScheduleItem[];
     homework?: Homework[];
+    submissions?: Submission[];
     sheetId: string;
   }): { userCount: number; studentCount: number; scheduleCount: number; homeworkCount: number } {
     let uCount = 0;
@@ -257,6 +260,10 @@ class DataService {
       });
       this.state.homework = list;
       hwCount = data.homework.length;
+    }
+
+    if (data.submissions && data.submissions.length > 0) {
+      this.mergeSubmissionsFromSheet(data.submissions);
     }
 
     this.state.settings.sheetId = data.sheetId;
@@ -529,6 +536,24 @@ class DataService {
     this.state.homework.unshift(newHw);
     this.saveState();
     return newHw;
+  }
+
+  /**
+   * Push progress to Google Sheets in the background when an OAuth session is
+   * available. Local work is retained if Google is disconnected or unavailable.
+   */
+  private async syncSubmissionProgressToSheet(): Promise<void> {
+    const sheetId = this.state.settings.sheetId;
+    if (!sheetId) return;
+    try {
+      const token = await getAccessToken();
+      if (!token) return;
+      await syncSubmissionsToSheet(sheetId, token, this.state.submissions);
+      this.state.settings.lastSyncAt = new Date().toISOString();
+      this.saveState();
+    } catch (error) {
+      console.warn('Google Sheets progress sync failed; local data is preserved.', error);
+    }
   }
 
   public getSubmissions(homeworkId?: string, studentId?: string): Submission[] {
@@ -833,6 +858,7 @@ class DataService {
       `${submissions.length} сурагчийн даалгаврын гүйцэтгэлийг бүртгэв.`
     );
     this.saveState();
+    void this.syncSubmissionProgressToSheet();
   }
 
   public mergeSubmissionsFromSheet(sheetSubmissions: Submission[]): number {
@@ -878,6 +904,7 @@ class DataService {
       `Багш даалгаврыг шалгаж, төлөвийг "${status}" болголоо.`
     );
     this.saveState();
+    void this.syncSubmissionProgressToSheet();
     return true;
   }
 
@@ -921,6 +948,7 @@ class DataService {
       'Сурагч даалгавраа багшид шалгуулахаар илгээв.'
     );
     this.saveState();
+    void this.syncSubmissionProgressToSheet();
     return submission;
   }
 
