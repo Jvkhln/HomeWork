@@ -152,6 +152,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({ isOpen, on
         students: parsed.students,
         schedule: parsed.schedule,
         homework: parsed.homework,
+        submissions: parsed.submissions,
         sheetId: sheetId.trim()
       });
       refreshUserData();
@@ -163,7 +164,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({ isOpen, on
       showToast(
         'success',
         'Sheet-ээс амжилттай синк хийлээ!',
-        `Хүснэгтийн бөглөсөн хэсгээс: ${counts.userCount} хэрэглэгч, ${counts.studentCount} сурагч, ${counts.scheduleCount} хичээлийн хуваарь, ${counts.homeworkCount} гэрийн даалгавар уншигдаж системд шинэчлэгдлээ.`
+        `Хүснэгтийн бөглөсөн хэсгээс: ${counts.userCount} хэрэглэгч, ${counts.studentCount} сурагч, ${counts.scheduleCount} хичээлийн хуваарь, ${counts.homeworkCount} гэрийн даалгавар уншигдаж системд шинэчлэгдлээ. Даалгаврын явцын мөрүүд мөн шинэчлэгдлээ.`
       );
     } catch (err: any) {
       setErrorMessage(err.message || 'Хүснэгтээс өгөгдөл татахад алдаа гарлаа.');
@@ -344,7 +345,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({ isOpen, on
                       Хүснэгттэй харилцах үндсэн үйлдлүүд:
                     </h4>
                     <p className="text-[11px] text-emerald-800 mt-0.5">
-                      Хүснэгтийн <strong>users</strong>, <strong>students</strong>, <strong>Schedule</strong> таб-уудын зөвхөн бөглөсөн мөрүүдийг уншиж системд синк хийнэ.
+                      Хүснэгтийн <strong>Users</strong>, <strong>Students</strong>, <strong>Schedule</strong> таб-уудын өгөгдлийг системд татаж, <strong>Submissions</strong> таб дахь даалгаврын явцыг хоёр чиглэлд синк хийнэ.
                     </p>
                   </div>
 
