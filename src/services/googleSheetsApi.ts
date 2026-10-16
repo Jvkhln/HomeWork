@@ -37,6 +37,7 @@ export interface ParsedSheetData {
   students: Student[];
   schedule: ScheduleItem[];
   homework: Homework[];
+  submissions: Submission[];
 }
 
 /**
@@ -206,6 +207,14 @@ export async function readFilledDataFromSheet(spreadsheetId: string, token: stri
     console.warn('Could not read Homework sheet:', e);
   }
 
+  // 5. Read submission progress (if the tab already exists)
+  let rawSubmissions: any[][] = [];
+  try {
+    rawSubmissions = await readRange(spreadsheetId, 'Submissions!A1:Z10000', token);
+  } catch (e) {
+    console.warn('Could not read Submissions sheet:', e);
+  }
+
   // Parse Users
   const parsedUsers = parseUsersRows(rawUsers);
   // Parse Students
@@ -214,12 +223,14 @@ export async function readFilledDataFromSheet(spreadsheetId: string, token: stri
   const parsedSchedule = parseScheduleRows(rawSchedule);
   // Parse Homework
   const parsedHomework = parseHomeworkRows(rawHomework);
+  const parsedSubmissions = parseSubmissionsRows(rawSubmissions);
 
   return {
     users: parsedUsers,
     students: parsedStudents,
     schedule: parsedSchedule,
-    homework: parsedHomework
+    homework: parsedHomework,
+    submissions: parsedSubmissions
   };
 }
 
@@ -481,6 +492,109 @@ function parseScheduleRows(rows: any[][]): ScheduleItem[] {
   }
 
   return items;
+}
+
+
+/** Parse saved homework progress from the Submissions tab. */
+function parseSubmissionsRows(rows: any[][]): Submission[] {
+  if (!rows || rows.length < 2) return [];
+  const headers = rows[0].map((value: any) => String(value || '').trim().toLowerCase());
+  const index = (names: string[], fallback: number) => {
+    const found = headers.findIndex(h => names.some(name => h === name || h.includes(name)));
+    return found >= 0 ? found : fallback;
+  };
+  const idIdx = index(['submissionid', 'submission id', 'бүртгэлийн дугаар'], 0);
+  const homeworkIdx = index(['homeworkid', 'homework id', 'даалгаврын код'], 1);
+  const studentIdx = index(['studentid', 'student id', 'сурагчийн код'], 2);
+  const statusIdx = index(['status', 'төлөв', 'үнэлгээ'], 3);
+  const submittedIdx = index(['submittedat', 'submitted at', 'илгээсэн огноо'], 4);
+  const checkedByIdx = index(['checkedby', 'шалгасан багш'], 5);
+  const checkedAtIdx = index(['checkedat', 'шалгасан огноо'], 6);
+  const commentIdx = index(['teachercomment', 'багшийн тайлбар'], 7);
+  const noteIdx = index(['studentnote', 'сурагчийн тайлбар'], 8);
+  const updatedIdx = index(['updatedat', 'шинэчилсэн огноо'], 9);
+  const leaderCommentIdx = index(['leadercomment', 'ахлагчийн тайлбар'], 10);
+  const attachmentIdx = index(['studentattachmenturl', 'attachmenturl', 'хавсралтын холбоос'], 11);
+  const validStatuses = new Set(['EXCELLENT', 'AVERAGE', 'NOT_DONE', 'DONE', 'IN_PROGRESS', 'LATE', 'SUBMITTED_FOR_REVIEW']);
+  const submissions: Submission[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const homeworkId = String(row[homeworkIdx] || '').trim();
+    const studentId = String(row[studentIdx] || '').trim();
+    if (!homeworkId || !studentId) continue;
+    const rawStatus = String(row[statusIdx] || 'NOT_DONE').trim().toUpperCase();
+    const status = (validStatuses.has(rawStatus) ? rawStatus : 'NOT_DONE') as Submission['status'];
+    submissions.push({
+      submissionId: String(row[idIdx] || `subm_sheet_${i}`).trim(),
+      homeworkId,
+      studentId,
+      status,
+      submittedAt: String(row[submittedIdx] || '').trim() || undefined,
+      checkedBy: String(row[checkedByIdx] || '').trim() || undefined,
+      checkedAt: String(row[checkedAtIdx] || '').trim() || undefined,
+      teacherComment: String(row[commentIdx] || '').trim() || undefined,
+      studentNote: String(row[noteIdx] || '').trim() || undefined,
+      updatedAt: String(row[updatedIdx] || '').trim() || new Date().toISOString(),
+      leaderComment: String(row[leaderCommentIdx] || '').trim() || undefined,
+      studentAttachmentUrl: String(row[attachmentIdx] || '').trim() || undefined
+    });
+  }
+  return submissions;
+}
+
+/**
+ * Upsert local homework progress into the Submissions tab without deleting
+ * rows written by other users or devices.
+ */
+export async function syncSubmissionsToSheet(
+  spreadsheetId: string,
+  token: string,
+  submissions: Submission[]
+): Promise<number> {
+  await ensureSheetsExist(spreadsheetId, token);
+  const headers = [
+    'submissionId', 'homeworkId', 'studentId', 'status', 'submittedAt',
+    'checkedBy', 'checkedAt', 'teacherComment', 'studentNote', 'updatedAt',
+    'leaderComment', 'studentAttachmentUrl'
+  ];
+  const rows = await readRange(spreadsheetId, 'Submissions!A1:L10000', token);
+  const existingHeaders = rows[0] || [];
+  const normalizedHeaders = existingHeaders.map((h: any) => String(h || '').trim().toLowerCase());
+  if (rows.length === 0) {
+    await writeRange(spreadsheetId, 'Submissions!A1:L1', [headers], token);
+  } else if (headers.some((h, i) => normalizedHeaders[i] !== h.toLowerCase())) {
+    // Keep existing data rows; standardize only the header row.
+    await writeRange(spreadsheetId, 'Submissions!A1:L1', [headers], token);
+  }
+
+  const rowByKey = new Map<string, number>();
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const homeworkId = String(row[1] || '').trim();
+    const studentId = String(row[2] || '').trim();
+    const submissionId = String(row[0] || '').trim();
+    if (submissionId) rowByKey.set('id:' + submissionId, i + 1);
+    if (homeworkId && studentId) rowByKey.set('pair:' + homeworkId + ':' + studentId, i + 1);
+  }
+
+  let written = 0;
+  let nextRow = Math.max(2, rows.length + 1);
+  for (const sub of submissions) {
+    const values = [[
+      sub.submissionId, sub.homeworkId, sub.studentId, sub.status,
+      sub.submittedAt || '', sub.checkedBy || '', sub.checkedAt || '',
+      sub.teacherComment || '', sub.studentNote || '', sub.updatedAt || new Date().toISOString(),
+      sub.leaderComment || '', sub.studentAttachmentUrl || ''
+    ]];
+    const targetRow = rowByKey.get('id:' + sub.submissionId) ||
+      rowByKey.get('pair:' + sub.homeworkId + ':' + sub.studentId);
+    const rowNumber = targetRow || nextRow++;
+    await writeRange(spreadsheetId, `Submissions!A${rowNumber}:L${rowNumber}`, values, token);
+    rowByKey.set('id:' + sub.submissionId, rowNumber);
+    rowByKey.set('pair:' + sub.homeworkId + ':' + sub.studentId, rowNumber);
+    written++;
+  }
+  return written;
 }
 
 /**
