@@ -34,7 +34,7 @@ var SCHEMAS = {
   Students: ['studentId', 'studentCode', 'fullName', 'classId', 'active', 'publicDisplayName', 'showOnLeaderboard'],
   Schedule: ['scheduleId', 'classId', 'weekday', 'period', 'subjectId', 'subjectName', 'teacherName', 'startTime', 'endTime', 'active', 'notes'],
   Homework: ['homeworkId', 'classId', 'subjectId', 'subjectName', 'title', 'description', 'assignedDate', 'dueDate', 'createdBy', 'status', 'createdAt'],
-  Submissions: ['submissionId', 'homeworkId', 'studentId', 'status', 'submittedAt', 'checkedBy', 'checkedAt', 'teacherComment', 'studentNote', 'updatedAt'],
+  Submissions: ['submissionId', 'homeworkId', 'studentId', 'status', 'submittedAt', 'checkedBy', 'checkedAt', 'teacherComment', 'studentNote', 'updatedAt', 'leaderComment', 'studentAttachmentUrl'],
   Leaders: ['leaderId', 'userId', 'classId', 'assignedBy', 'active', 'createdAt'],
   Settings: ['settingKey', 'settingValue', 'updatedAt'],
   AuditLog: ['logId', 'userId', 'userName', 'action', 'targetType', 'targetId', 'timestamp', 'details']
