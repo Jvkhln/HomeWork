@@ -35,6 +35,11 @@ export interface User {
   passwordHash?: string;
   role: UserRole;
   studentId?: string;
+  classId?: string;
+  groupId?: string;
+  groupNumber?: number;
+  groupName?: string;
+  isLeader?: boolean;
   active: boolean;
   displayName: string;
   createdAt: string;
@@ -52,6 +57,7 @@ export interface Student {
   groupNumber?: number; // 1, 2, 3, 4, 5
   groupName?: string; // e.g. "1-р хэсэг"
   isLeader?: boolean;
+  password?: string;
 }
 
 export interface ClassGroup {
@@ -82,10 +88,15 @@ export interface ScheduleItem {
   subjectId: string;
   subjectName: string;
   teacherName: string;
+  room?: string;
   startTime: string; // e.g. "08:00"
   endTime: string;   // e.g. "08:45"
   active: boolean;
   notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  deleted?: boolean;
 }
 
 export interface Homework {

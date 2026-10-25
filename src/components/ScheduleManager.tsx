@@ -17,8 +17,6 @@ import { ScheduleItem, SubjectType } from '../types';
 import { dataService } from '../services/dataService';
 import { useAuth } from '../context/AuthContext';
 import { WEEKDAYS } from '../utils/dateUtils';
-import { getAccessToken } from '../services/googleAuth';
-import { syncScheduleToSheet, readFilledDataFromSheet } from '../services/googleSheetsApi';
 
 interface ScheduleManagerProps {
   classId: string;
@@ -78,58 +76,24 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({ classId }) => 
   const [, setVersion] = useState(0);
   const [isSyncingSheet, setIsSyncingSheet] = useState(false);
 
-  // Sync active schedule directly to Google Sheet
+  // Хуваарь автоматаар Google Sheet-д хадгалагддаг; эдгээр нь гараар албадах товчнууд
   const handlePushScheduleToSheet = async () => {
     setIsSyncingSheet(true);
     try {
-      const settings = dataService.getSettings();
-      const sheetId = settings.sheetId || '1Q6zw3ylYDCeKoEUuXey3Pu7lQT8LMc_r8e2jyHa8cTM';
-      const token = await getAccessToken();
-
-      if (!token) {
-        showToast('warning', 'Google нэвтрэлт шаардлагатай', 'Google Sheets-тэй синк хийхийн тулд Google бүртгэлээр нэвтэрсэн байх шаардлагатай.');
-        return;
-      }
-
-      const allItems = dataService.getSchedule();
-      const result = await syncScheduleToSheet(sheetId, token, allItems);
-      showToast('success', 'Google Sheet-д хадгалагдлаа', `Нийт ${result.count} хуваарийн мөр Google Sheet-ийн "Schedule" таб руу амжилттай синк хийгдлээ.`);
-    } catch (err: any) {
-      showToast('error', 'Хуваарь синк хийхэд алдаа гарлаа', err.message || 'Google Sheets холболтоо шалгана уу.');
+      const res = await dataService.syncNow();
+      setVersion(v => v + 1);
+      showToast(res.success ? 'success' : 'error', res.success ? 'Google Sheet-д хадгалагдлаа' : 'Хадгалахад алдаа гарлаа', res.message);
     } finally {
       setIsSyncingSheet(false);
     }
   };
 
-  // Pull latest schedule from Google Sheet
   const handlePullScheduleFromSheet = async () => {
     setIsSyncingSheet(true);
     try {
-      const settings = dataService.getSettings();
-      const sheetId = settings.sheetId || '1Q6zw3ylYDCeKoEUuXey3Pu7lQT8LMc_r8e2jyHa8cTM';
-      const token = await getAccessToken();
-
-      if (!token) {
-        showToast('warning', 'Google нэвтрэлт шаардлагатай', 'Google Sheet-ээс хуваарь татахын тулд нэвтэрнэ үү.');
-        return;
-      }
-
-      const parsed = await readFilledDataFromSheet(sheetId, token);
-      if (parsed.schedule && parsed.schedule.length > 0) {
-        dataService.importFromGoogleSheet({
-          users: parsed.users,
-          students: parsed.students,
-          schedule: parsed.schedule,
-          homework: parsed.homework,
-          sheetId
-        });
-        setVersion(v => v + 1);
-        showToast('success', 'Google Sheet-ээс татлаа', `${parsed.schedule.length} хичээлийн хуваарь амжилттай татагдаж шинэчлэгдлээ.`);
-      } else {
-        showToast('info', 'Мэдээлэл олдсонгүй', 'Google Sheet-ийн "Schedule" таб хоосон байна.');
-      }
-    } catch (err: any) {
-      showToast('error', 'Google Sheet-ээс татахад алдаа гарлаа', err.message || 'Холболтоо шалгана уу.');
+      const res = await dataService.syncNow();
+      setVersion(v => v + 1);
+      showToast(res.success ? 'success' : 'error', res.success ? 'Google Sheet-ээс шинэчиллээ' : 'Татахад алдаа гарлаа', res.message);
     } finally {
       setIsSyncingSheet(false);
     }
@@ -192,20 +156,6 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({ classId }) => 
     dataService.saveScheduleItem(currentUser, itemToSave);
     setVersion(v => v + 1);
 
-    // Auto-sync schedule to Google Sheet in background
-    (async () => {
-      try {
-        const token = await getAccessToken();
-        const settings = dataService.getSettings();
-        const sheetId = settings.sheetId || '1Q6zw3ylYDCeKoEUuXey3Pu7lQT8LMc_r8e2jyHa8cTM';
-        if (token && sheetId) {
-          const allItems = dataService.getSchedule();
-          await syncScheduleToSheet(sheetId, token, allItems);
-        }
-      } catch (err) {
-        console.warn('Auto-sync schedule failed:', err);
-      }
-    })();
 
     showToast('success', 'Хуваарь шинэчлэгдлээ', `${period}-р цагт "${selectedValue}" хичээл сонгогдлоо.`);
   };
@@ -216,19 +166,6 @@ export const ScheduleManager: React.FC<ScheduleManagerProps> = ({ classId }) => 
     dataService.deleteScheduleItem(currentUser, scheduleId);
     setVersion(v => v + 1);
 
-    (async () => {
-      try {
-        const token = await getAccessToken();
-        const settings = dataService.getSettings();
-        const sheetId = settings.sheetId || '1Q6zw3ylYDCeKoEUuXey3Pu7lQT8LMc_r8e2jyHa8cTM';
-        if (token && sheetId) {
-          const allItems = dataService.getSchedule();
-          await syncScheduleToSheet(sheetId, token, allItems);
-        }
-      } catch (err) {
-        console.warn('Auto-sync schedule deletion failed:', err);
-      }
-    })();
 
     showToast('info', 'Хичээл хасагдлаа', `"${subjectName}" хичээл хуваариас хасагдлаа.`);
   };

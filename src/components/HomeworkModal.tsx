@@ -4,8 +4,6 @@ import { Homework } from '../types';
 import { dataService } from '../services/dataService';
 import { useAuth } from '../context/AuthContext';
 import { getTodayUlaanbaatar } from '../utils/dateUtils';
-import { getAccessToken } from '../services/googleAuth';
-import { syncHomeworkToSheet } from '../services/googleSheetsApi';
 
 interface HomeworkModalProps {
   isOpen: boolean;
@@ -65,22 +63,8 @@ export const HomeworkModal: React.FC<HomeworkModalProps> = ({
 
     dataService.saveHomework(currentUser, hw);
 
-    // Auto-sync to Google Sheet Homework tab in background
-    (async () => {
-      try {
-        const token = await getAccessToken();
-        const settings = dataService.getSettings();
-        const sheetId = settings.sheetId || '1Q6zw3ylYDCeKoEUuXey3Pu7lQT8LMc_r8e2jyHa8cTM';
-        if (token && sheetId) {
-          const allHw = dataService.getHomework();
-          await syncHomeworkToSheet(sheetId, token, allHw);
-        }
-      } catch (sheetErr) {
-        console.warn('Auto-sync homework to sheet failed:', sheetErr);
-      }
-    })();
 
-    showToast('success', 'Амжилттай хадгалагдлаа', `"${hw.title}" даалгавар систем болон Google Sheet-д бүртгэгдлээ.`);
+    showToast('success', 'Амжилттай хадгалагдлаа', `"${hw.title}" даалгавар систем болон Google Sheet-д бүртгэгдлээ (автоматаар хадгалагдана).`);
     onSaved();
     onClose();
   };

@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { BookOpen, LogOut, UserCircle } from 'lucide-react';
+import { SyncBadge } from './SyncBadge';
 
 interface HeaderProps {
   onOpenAuthModal: () => void;
@@ -38,6 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Right Action buttons */}
           <div className="flex items-center gap-2.5">
+            {currentUser && <SyncBadge />}
             {currentUser ? (
               <div className="flex items-center gap-2.5 pl-2 border-l border-slate-200">
                 <div className="flex items-center gap-2 text-right">

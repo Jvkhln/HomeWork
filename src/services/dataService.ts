@@ -24,6 +24,8 @@ import {
   INITIAL_AUDIT_LOGS
 } from './mockData';
 import { getTodayUlaanbaatar } from '../utils/dateUtils';
+import { gasGet, gasPost, GasApiError, GasNetworkError, isValidGasUrl } from './gasClient';
+import { SheetSync, SyncStatus, TableBinding, PullPayload } from './sheetSync';
 
 const STORAGE_KEY = 'homework_app_state_v1';
 
@@ -40,11 +42,19 @@ interface AppState {
   auditLogs: AuditLogEntry[];
 }
 
+const DEFAULT_GAS_URL: string = (import.meta as any).env?.VITE_GAS_URL || '';
+
 class DataService {
   private state: AppState;
+  private sync: SheetSync | null = null;
+  private syncStarted = false;
+  private suspendNotify = false;
+  private changeListeners = new Set<() => void>();
+  private authErrorHandler: ((message: string) => void) | null = null;
 
   constructor() {
     this.state = this.loadState();
+    if (this.isSheetsMode()) this.ensureSync();
   }
 
   private loadState(): AppState {
@@ -59,6 +69,10 @@ class DataService {
           parsed.settings = INITIAL_SETTINGS;
         } else if (!parsed.settings.sheetId) {
           parsed.settings.sheetId = '1Q6zw3ylYDCeKoEUuXey3Pu7lQT8LMc_r8e2jyHa8cTM';
+        }
+        if (DEFAULT_GAS_URL && !parsed.settings.gasWebAppUrl) {
+          parsed.settings.gasWebAppUrl = DEFAULT_GAS_URL;
+          parsed.settings.mode = 'GOOGLE_SHEETS';
         }
         // Deduplicate any corrupted homework items from legacy invalid key generation
         if (Array.isArray(parsed.homework)) {
@@ -88,6 +102,21 @@ class DataService {
     } catch {
       // ignore
     }
+    if (DEFAULT_GAS_URL) {
+      // Sheet горим: демо өгөгдөл ЗАЙЛШГҮЙ хоосон эхэлнэ (Sheet рүү демо өгөгдөл урсахгүй)
+      return {
+        settings: { ...INITIAL_SETTINGS, gasWebAppUrl: DEFAULT_GAS_URL, mode: 'GOOGLE_SHEETS' },
+        users: [],
+        students: [],
+        subjects: [],
+        schedule: [],
+        homework: [],
+        submissions: [],
+        leaders: [],
+        groups: [],
+        auditLogs: []
+      };
+    }
     return {
       settings: INITIAL_SETTINGS,
       users: INITIAL_USERS,
@@ -101,12 +130,18 @@ class DataService {
     };
   }
 
-  private saveState(): void {
+  private persist(): void {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
     } catch (e) {
       console.error('Failed to save state to localStorage', e);
     }
+  }
+
+  private saveState(): void {
+    this.persist();
+    // Өөрчлөлт бүрийг Google Sheet рүү найдвартай илгээхээр дараалалд оруулна
+    if (this.sync && !this.suspendNotify) this.sync.notifyLocalChange();
   }
 
   public resetToDefaultDemo(): void {
@@ -134,165 +169,276 @@ class DataService {
     return this.state.settings;
   }
 
-  // --- Real Google Apps Script Integration ---
+  // --- Google Sheets (Apps Script) синхрончлол ---------------------------------
+
+  public isSheetsMode(): boolean {
+    return this.state.settings.mode === 'GOOGLE_SHEETS' && !!this.state.settings.gasWebAppUrl;
+  }
+
+  /** Өгөгдөл Sheet-ээс шинэчлэгдсэн үед UI-г дахин зурахад ашиглана. */
+  public subscribe(cb: () => void): () => void {
+    this.changeListeners.add(cb);
+    return () => this.changeListeners.delete(cb);
+  }
+
+  private emitChange() {
+    this.changeListeners.forEach(l => {
+      try {
+        l();
+      } catch {
+        /* ignore */
+      }
+    });
+  }
+
+  public subscribeSync(cb: () => void): () => void {
+    return this.sync ? this.sync.subscribe(cb) : () => {};
+  }
+
+  public getSyncStatus(): SyncStatus {
+    return (
+      this.sync?.getStatus() ?? {
+        connected: false,
+        syncing: false,
+        pending: 0,
+        lastSyncAt: null,
+        lastError: null,
+        lastPushAt: null
+      }
+    );
+  }
+
+  /** Нэвтрэх эрх хүчингүй болох үед (токен дууссан гэх мэт) дуудагдах handler. */
+  public setAuthErrorHandler(fn: (message: string) => void) {
+    this.authErrorHandler = fn;
+  }
+
+  private readSession(): { token: string | null; role: string | null } {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const user = localStorage.getItem('auth_user');
+      return { token, role: user ? JSON.parse(user).role : null };
+    } catch {
+      return { token: null, role: null };
+    }
+  }
+
+  private bindings(): TableBinding[] {
+    const st = this.state;
+    return [
+      { name: 'Schedule', key: 'scheduleId', propagateDeletes: true, get: () => st.schedule, set: r => (st.schedule = r) },
+      { name: 'Homework', key: 'homeworkId', propagateDeletes: false, get: () => st.homework, set: r => (st.homework = r) },
+      { name: 'Submissions', key: 'submissionId', propagateDeletes: false, get: () => st.submissions, set: r => (st.submissions = r) },
+      { name: 'Groups', key: 'groupId', propagateDeletes: true, get: () => st.groups || [], set: r => (st.groups = r) },
+      { name: 'Leaders', key: 'leaderId', propagateDeletes: false, get: () => st.leaders, set: r => (st.leaders = r) },
+      { name: 'StudentData', key: 'studentId', propagateDeletes: false, get: () => st.students, set: r => (st.students = r) },
+      { name: 'Subjects', key: 'subjectId', propagateDeletes: true, get: () => st.subjects || [], set: r => (st.subjects = r) },
+      { name: 'AuditLog', key: 'logId', propagateDeletes: false, get: () => st.auditLogs, set: r => (st.auditLogs = r) }
+    ];
+  }
+
+  private ensureSync(): SheetSync {
+    if (this.sync) return this.sync;
+    this.sync = new SheetSync({
+      getUrl: () => this.state.settings.gasWebAppUrl,
+      getToken: () => this.readSession().token,
+      getRole: () => this.readSession().role,
+      bindings: () => this.bindings(),
+      applyPull: (payload: PullPayload) => this.applyPull(payload),
+      onAuthError: (message: string) => this.authErrorHandler?.(message),
+      onChange: () => this.emitChange()
+    });
+    return this.sync;
+  }
+
+  /** Sheet-ээс ирсэн өгөгдлөөр локал төлөвийг сэргээнэ (Sheet = үнэн эх сурвалж). */
+  private applyPull(payload: PullPayload) {
+    const t = payload.tables;
+    this.state.schedule = (t.Schedule as ScheduleItem[]) || [];
+    this.state.homework = (t.Homework as Homework[]) || [];
+    this.state.submissions = (t.Submissions as Submission[]) || [];
+    this.state.groups = (t.Groups as ClassGroup[]) || [];
+    this.state.leaders = (t.Leaders as Leader[]) || [];
+    this.state.students = (t.StudentData as Student[]) || [];
+    this.state.subjects = (t.Subjects as SubjectType[]) || [];
+    this.state.auditLogs = (t.AuditLog as AuditLogEntry[]) || [];
+    if (Array.isArray(payload.users)) this.state.users = payload.users;
+    this.state.settings.lastSyncAt = new Date().toISOString();
+    this.persist();
+  }
+
+  /** Хэрэглэгчийн өгөгдлийн бүх хүснэгтийг хоослоно (нууц өгөгдөл / демо өгөгдөл үлдэхгүй). */
+  private wipeData() {
+    this.suspendNotify = true;
+    try {
+      this.state.users = [];
+      this.state.students = [];
+      this.state.subjects = [];
+      this.state.schedule = [];
+      this.state.homework = [];
+      this.state.submissions = [];
+      this.state.leaders = [];
+      this.state.groups = [];
+      this.state.auditLogs = [];
+      this.sync?.resetSnapshot();
+      this.persist();
+    } finally {
+      this.suspendNotify = false;
+    }
+  }
 
   public async testGasConnection(url: string): Promise<{ success: boolean; message: string }> {
-    if (!url || !url.startsWith('https://script.google.com/macros/s/')) {
-      return { success: false, message: 'Google Apps Script URL буруу байна (https://script.google.com/macros/s/... байх ёстой).' };
+    if (!isValidGasUrl(url)) {
+      return { success: false, message: 'Web App URL буруу байна. https://script.google.com/macros/s/.../exec хэлбэртэй байх ёстой.' };
     }
-
     try {
-      const response = await fetch(`${url}?action=ping`, { method: 'GET', mode: 'cors' });
-      const data = await response.json();
-      if (data && data.success) {
-        return { success: true, message: data.message || 'Google Apps Script амжилттай холбогдлоо!' };
+      const data: any = await gasGet(url.trim(), { action: 'ping' }, 20000);
+      if (!data.version || data.version < 2) {
+        return {
+          success: false,
+          message: 'Apps Script-ийн ХУУЧИН хувилбар deploy хийгдсэн байна. apps-script/Code.gs-ийн шинэ кодыг хуулж, Deploy → Manage deployments → Edit → New version сонгоно уу.'
+        };
       }
-      return { success: false, message: data.error || 'Серверээс алдаа буцаалаа.' };
+      return { success: true, message: data.message || 'Google Apps Script амжилттай холбогдлоо!' };
     } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      return {
-        success: false,
-        message: `Холболт амжилтгүй боллоо: ${errorMsg}. CORS эсвэл 'Who has access: Anyone' тохиргоог шалгана уу.`
-      };
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, message: `Холболт амжилтгүй: ${msg}` };
     }
   }
 
-  public async syncWithGas(): Promise<{ success: boolean; message: string }> {
-    const url = this.state.settings.gasWebAppUrl;
-    if (this.state.settings.mode !== 'GOOGLE_SHEETS' || !url) {
+  /** Sheet горимд шилжиж, URL-г хадгална. Локал демо өгөгдлийг цэвэрлэнэ. */
+  public async connectSheets(url: string): Promise<{ success: boolean; message: string }> {
+    const test = await this.testGasConnection(url);
+    if (!test.success) return test;
+    this.sync?.stop();
+    this.syncStarted = false;
+    this.state.settings = { ...this.state.settings, mode: 'GOOGLE_SHEETS', gasWebAppUrl: url.trim(), lastSyncAt: null };
+    this.ensureSync();
+    this.wipeData();
+    this.emitChange();
+    return { success: true, message: test.message };
+  }
+
+  public disconnectSheets(): void {
+    this.sync?.stop();
+    this.sync?.resetSnapshot();
+    this.syncStarted = false;
+    this.state.settings = { ...this.state.settings, mode: 'DEMO', lastSyncAt: null };
+    this.sync = null;
+    this.resetToDefaultDemo();
+    this.emitChange();
+  }
+
+  /**
+   * Нэвтэрсний дараа / хуудас дахин ачаалсан үед дуудна.
+   * fresh=true: шинэ нэвтрэлт — өмнөх (нийтийн/өөр хэрэглэгчийн) өгөгдлийг цэвэрлээд Sheet-ээс татна.
+   */
+  public async startSession(fresh: boolean, userId?: string): Promise<void> {
+    if (!this.isSheetsMode()) return;
+    const sync = this.ensureSync();
+    const OWNER_KEY = 'homework_app_session_owner';
+    let owner: string | null = null;
+    try {
+      owner = localStorage.getItem(OWNER_KEY);
+    } catch {
+      /* ignore */
+    }
+    // Ижил хэрэглэгч дахин нэвтэрсэн бөгөөд хадгалагдаагүй өөрчлөлт үлдсэн бол ХАДГАЛЖ үлдээнэ (алдагдуулахгүй)
+    const keepUnsaved = fresh && !!userId && owner === userId && sync.countPendingRaw() > 0;
+    if (fresh && !keepUnsaved) this.wipeData();
+    if (userId) {
+      try {
+        localStorage.setItem(OWNER_KEY, userId);
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!this.syncStarted) {
+      sync.start();
+      this.syncStarted = true;
+    }
+    await sync.pull();
+  }
+
+  /** Гарах үед: хадгалагдаагүй өөрчлөлтийг илгээх оролдлого, дараа нь локал өгөгдлийг цэвэрлэнэ. */
+  public async endSession(): Promise<void> {
+    if (!this.sync) return;
+    try {
+      await Promise.race([this.sync.flush(), new Promise(res => setTimeout(res, 8000))]);
+    } catch {
+      /* статус дотор бүртгэгдсэн */
+    }
+    this.sync.stop();
+    this.syncStarted = false;
+    if (this.sync.countPendingRaw() === 0) this.wipeData();
+  }
+
+  public hasPendingChanges(): boolean {
+    return !!this.sync && this.sync.countPendingRaw() > 0;
+  }
+
+  /** Багш гараар "Одоо хадгалах / шинэчлэх" дарсан үед. */
+  public async syncNow(): Promise<{ success: boolean; message: string }> {
+    if (!this.isSheetsMode() || !this.sync) {
       return { success: false, message: 'Google Sheets горим идэвхжээгүй байна.' };
     }
-
     try {
-      // In real mode, pull data
-      const token = localStorage.getItem('auth_token') || '';
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'fetchAll', token })
-      });
-      const resData = await response.json();
-      if (resData.success && resData.data) {
-        if (resData.data.students) this.state.students = resData.data.students;
-        if (resData.data.schedule) this.state.schedule = resData.data.schedule;
-        if (resData.data.homework) this.state.homework = resData.data.homework;
-        if (resData.data.submissions) this.state.submissions = resData.data.submissions;
-        if (resData.data.leaders) this.state.leaders = resData.data.leaders;
-        if (resData.data.auditLogs) this.state.auditLogs = resData.data.auditLogs;
-        
-        this.state.settings.lastSyncAt = new Date().toISOString();
-        this.saveState();
-        return { success: true, message: 'Google Sheets-ээс өгөгдөл амжилттай татагдлаа.' };
-      }
-      return { success: false, message: resData.error || 'Өгөгдөл татахад алдаа гарлаа.' };
-    } catch (e: unknown) {
-      const err = e instanceof Error ? e.message : String(e);
-      return { success: false, message: `Синхрончлол амжилтгүй: ${err}` };
+      await this.sync.pull();
+      return { success: true, message: 'Google Sheet-тэй синк хийгдлээ.' };
+    } catch (err: unknown) {
+      return { success: false, message: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  // --- Import directly from Google Sheet (Users, Students, Schedule) ---
-
-  public importFromGoogleSheet(data: {
-    users?: User[];
-    students?: Student[];
-    schedule?: ScheduleItem[];
-    homework?: Homework[];
-    sheetId: string;
-  }): { userCount: number; studentCount: number; scheduleCount: number; homeworkCount: number } {
-    let uCount = 0;
-    let sCount = 0;
-    let schCount = 0;
-    let hwCount = 0;
-
-    if (data.users && data.users.length > 0) {
-      this.state.users = [...data.users];
-      uCount = data.users.length;
+  /** Админ / Багш гараар "Sync хийх" (syncUsers) дарсан үед: users sheet-ийн cache-ийг шинэчлээд бүх өгөгдлийг татна. */
+  public async syncUsers(): Promise<{ success: boolean; message: string; duplicates?: string[] }> {
+    if (!this.isSheetsMode() || !this.sync) {
+      return { success: false, message: 'Google Sheets горим идэвхжээгүй байна.' };
     }
-
-    if (data.students && data.students.length > 0) {
-      this.state.students = [...data.students];
-      sCount = data.students.length;
+    const { token } = this.readSession();
+    if (!token) {
+      return { success: false, message: 'Нэвтрэх эрх олдсонгүй. Дахин нэвтэрнэ үү.' };
     }
-
-    if (data.schedule && data.schedule.length > 0) {
-      this.state.schedule = [...data.schedule];
-      schCount = data.schedule.length;
-
-      // Also ensure subject types exist for any imported subjects
-      if (!this.state.subjects) {
-        this.state.subjects = [...INITIAL_SUBJECTS];
-      }
-      const existingNames = new Set(this.state.subjects.map(s => s.name.toLowerCase()));
-      data.schedule.forEach(sch => {
-        if (sch.subjectName && !existingNames.has(sch.subjectName.toLowerCase())) {
-          existingNames.add(sch.subjectName.toLowerCase());
-          this.state.subjects?.push({
-            subjectId: sch.subjectId || `sub_${sch.subjectName.toLowerCase().replace(/[^a-zA-Z0-9]/g, '_')}`,
-            name: sch.subjectName,
-            color: 'blue',
-            category: 'Үндсэн',
-            active: true
-          });
-        }
-      });
+    try {
+      const res: any = await gasPost(this.state.settings.gasWebAppUrl, { action: 'syncUsers', token }, 30000);
+      await this.sync.pull();
+      const dupMsg = Array.isArray(res.duplicates) && res.duplicates.length > 0
+        ? ` (Анхаар: давхардсан нэвтрэх нэр: ${res.duplicates.join(', ')})`
+        : '';
+      return {
+        success: true,
+        message: (res.message || 'Users sheet-ээс хэрэглэгчийн мэдээлэл амжилттай синк хийгдлээ.') + dupMsg,
+        duplicates: res.duplicates
+      };
+    } catch (err: unknown) {
+      return { success: false, message: err instanceof Error ? err.message : String(err) };
     }
+  }
 
-    if (data.homework && data.homework.length > 0) {
-      // Merge homework deduplicating by homeworkId
-      const seen = new Set<string>();
-      const list: Homework[] = [];
-      data.homework.forEach(h => {
-        if (!seen.has(h.homeworkId)) {
-          seen.add(h.homeworkId);
-          list.push(h);
-        }
-      });
-      // Also keep existing homework not in sheet
-      this.state.homework.forEach(h => {
-        if (!seen.has(h.homeworkId)) {
-          seen.add(h.homeworkId);
-          list.push(h);
-        }
-      });
-      this.state.homework = list;
-      hwCount = data.homework.length;
+  /** Нэвтрээгүй хэрэглэгчид нийтийн самбарын өгөгдлийг (нууц мэдээлэлгүй) татна. */
+  public async loadPublic(): Promise<void> {
+    if (!this.isSheetsMode()) return;
+    const { token } = this.readSession();
+    if (token) return;
+    try {
+      await this.ensureSync().pullPublic();
+    } catch (err) {
+      console.warn('Нийтийн өгөгдөл татаж чадсангүй', err);
     }
-
-    this.state.settings.sheetId = data.sheetId;
-    this.state.settings.lastSyncAt = new Date().toISOString();
-
-    this.addAuditLog(
-      'system',
-      'Google Sheets Sync',
-      'SYNC_FROM_SHEET',
-      'SHEET',
-      data.sheetId,
-      `Google Sheet-ээс ${uCount} хэрэглэгч, ${sCount} сурагч, ${schCount} хичээлийн хуваарь, ${hwCount} даалгавар амжилттай уншиж синк хийв.`
-    );
-
-    this.saveState();
-    return { userCount: uCount, studentCount: sCount, scheduleCount: schCount, homeworkCount: hwCount };
   }
 
   // --- Auth Verification ---
 
   public async login(username: string, password: string): Promise<{ success: boolean; user?: User; token?: string; error?: string }> {
-    // If in Google Sheets mode and URL configured, request via GAS
-    if (this.state.settings.mode === 'GOOGLE_SHEETS' && this.state.settings.gasWebAppUrl) {
+    // Google Sheets горим: эхний 2 sheet-ийн нэвтрэх нэр/нууц үгээр сервер дээр шалгана
+    if (this.isSheetsMode()) {
       try {
-        const response = await fetch(this.state.settings.gasWebAppUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'login', username, password })
-        });
-        const data = await response.json();
-        if (data.success && data.user) {
-          return { success: true, user: data.user, token: data.token };
-        }
-        return { success: false, error: data.error || 'Нэвтрэх нэр эсвэл нууц үг буруу.' };
+        const data: any = await gasPost(this.state.settings.gasWebAppUrl, { action: 'login', username, password }, 30000);
+        return { success: true, user: data.user, token: data.token };
       } catch (err: unknown) {
-        return { success: false, error: 'Google Sheets API холбогдож чадсангүй: ' + (err instanceof Error ? err.message : String(err)) };
+        if (err instanceof GasApiError) return { success: false, error: err.message };
+        if (err instanceof GasNetworkError) return { success: false, error: 'Google Sheets холбогдож чадсангүй: ' + err.message };
+        return { success: false, error: 'Нэвтрэхэд алдаа гарлаа: ' + (err instanceof Error ? err.message : String(err)) };
       }
     }
 
@@ -835,30 +981,6 @@ class DataService {
     this.saveState();
   }
 
-  public mergeSubmissionsFromSheet(sheetSubmissions: Submission[]): number {
-    let count = 0;
-    sheetSubmissions.forEach(sub => {
-      const idx = this.state.submissions.findIndex(
-        s => (s.submissionId === sub.submissionId) || (s.homeworkId === sub.homeworkId && s.studentId === sub.studentId)
-      );
-      if (idx >= 0) {
-        this.state.submissions[idx] = {
-          ...this.state.submissions[idx],
-          ...sub,
-          updatedAt: sub.updatedAt || new Date().toISOString()
-        };
-      } else {
-        this.state.submissions.push({
-          ...sub,
-          updatedAt: sub.updatedAt || new Date().toISOString()
-        });
-      }
-      count++;
-    });
-    this.saveState();
-    return count;
-  }
-
   public verifySubmission(actor: User, submissionId: string, status: SubmissionStatus, comment?: string): boolean {
     const sub = this.state.submissions.find(s => s.submissionId === submissionId);
     if (!sub) return false;
@@ -928,6 +1050,8 @@ class DataService {
     const student = this.state.students.find(s => s.studentId === studentId);
     if (!student) return;
 
+    student.isLeader = active;
+
     let user = this.state.users.find(u => u.studentId === studentId);
     if (!user) {
       user = {
@@ -978,7 +1102,9 @@ class DataService {
       this.state.groups = [];
     }
     let classGroups = this.state.groups.filter(g => g.classId === classId);
-    if (classGroups.length === 0) {
+    // Sheet горимд хэсгийг зөвхөн багш автоматаар үүсгэнэ (сурагч/ахлагчийн рендерээс бичилт гарахгүй)
+    const canAutoInit = !this.isSheetsMode() || this.readSession().role === 'TEACHER';
+    if (classGroups.length === 0 && canAutoInit) {
       // Auto-initialize standard 3 groups if not already created
       classGroups = this.splitClassIntoGroups({ userId: 'system', username: 'system', displayName: 'Систем', role: 'TEACHER', active: true, createdAt: '' }, classId, 3);
     }

@@ -32,8 +32,6 @@ import { VerificationModal } from './VerificationModal';
 import { AuditLogView } from './AuditLogView';
 import { getTodayUlaanbaatar, getWeekRange, getMonthRange } from '../utils/dateUtils';
 import { exportToCSV } from '../utils/csvExport';
-import { getAccessToken } from '../services/googleAuth';
-import { readSubmissionsFromSheet, readFilledDataFromSheet } from '../services/googleSheetsApi';
 
 export const TeacherDashboard: React.FC = () => {
   const { currentUser, showToast } = useAuth();
@@ -72,43 +70,14 @@ export const TeacherDashboard: React.FC = () => {
   const handlePullLatestFromSheet = async () => {
     setIsPullingSheet(true);
     try {
-      const settings = dataService.getSettings();
-      const sheetId = settings.sheetId || '1Q6zw3ylYDCeKoEUuXey3Pu7lQT8LMc_r8e2jyHa8cTM';
-      const token = await getAccessToken();
-
-      if (!token) {
+      if (!dataService.isSheetsMode()) {
         setRefreshTrigger(prev => prev + 1);
-        showToast('info', 'Шинэчлэгдлээ', 'Хамгийн сүүлийн үеийн өгөгдлийг системээс шинэчлэн уншлаа.');
+        showToast('info', 'Шинэчлэгдлээ', 'Демо горимд ажиллаж байна. Google Sheets холбоогүй.');
         return;
       }
-
-      // 1. Pull users, students, schedule, and homework from Google Sheet
-      const parsed = await readFilledDataFromSheet(sheetId, token);
-      const counts = dataService.importFromGoogleSheet({
-        users: parsed.users,
-        students: parsed.students,
-        schedule: parsed.schedule,
-        homework: parsed.homework,
-        sheetId
-      });
-
-      // 2. Also pull submissions and evaluations
-      const sheetSubs = await readSubmissionsFromSheet(sheetId, token);
-      let mergedSubs = 0;
-      if (sheetSubs && sheetSubs.length > 0) {
-        mergedSubs = dataService.mergeSubmissionsFromSheet(sheetSubs);
-      }
-
+      const res = await dataService.syncUsers();
       setRefreshTrigger(prev => prev + 1);
-      showToast(
-        'success',
-        'Google Sheet-тэй синк хийгдлээ',
-        `Хүснэгтээс ${counts.scheduleCount} хуваарь, ${counts.homeworkCount} даалгавар, ${mergedSubs} үнэлгээ амжилттай татагдаж шинэчлэгдлээ.`
-      );
-    } catch (err: any) {
-      console.warn('Pull sheet error:', err);
-      setRefreshTrigger(prev => prev + 1);
-      showToast('error', 'Google Sheet-ээс татахад алдаа гарлаа', err.message || 'Хүснэгтийн холболтоо шалгана уу.');
+      showToast(res.success ? 'success' : 'error', res.success ? 'Users Sheet & Өгөгдөл Sync хийгдлээ' : 'Sync хийхэд алдаа гарлаа', res.message);
     } finally {
       setIsPullingSheet(false);
     }
@@ -298,11 +267,11 @@ export const TeacherDashboard: React.FC = () => {
           <button
             onClick={handlePullLatestFromSheet}
             disabled={isPullingSheet}
-            title="Google Sheet-ээс ахлагчийн сүүлийн бүртгэлийг шинэчлэх"
+            title="Users sheet-ийн cache шинэчлэх болон бүх өгөгдөл Sync хийх (syncUsers)"
             className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-xs hover:shadow-md transition-all disabled:opacity-50 active:scale-95"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isPullingSheet ? 'animate-spin' : ''}`} />
-            <span>Шинэчлэх</span>
+            <span>{isPullingSheet ? 'Sync хийж байна...' : 'Sync хийх'}</span>
           </button>
 
           <button

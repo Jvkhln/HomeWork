@@ -19,8 +19,6 @@ import { dataService } from '../services/dataService';
 import { useAuth } from '../context/AuthContext';
 import { SubmissionStatus, Submission } from '../types';
 import { getTodayUlaanbaatar, getCurrentWeekday, WEEKDAYS } from '../utils/dateUtils';
-import { getAccessToken } from '../services/googleAuth';
-import { syncSubmissionsToSheet } from '../services/googleSheetsApi';
 
 export const LeaderDashboard: React.FC = () => {
   const { currentUser, showToast } = useAuth();
@@ -184,27 +182,12 @@ export const LeaderDashboard: React.FC = () => {
     // 1. First record directly in central DataService so it is instantly available
     dataService.recordSubmissionBatch(currentUser, submissionsToSave);
 
-    // 2. Also reliably push to Google Sheet (Submissions & Evaluations tab)
-    const settings = dataService.getSettings();
-    const sheetId = settings.sheetId || '1Q6zw3ylYDCeKoEUuXey3Pu7lQT8LMc_r8e2jyHa8cTM';
-    let sheetSyncSuccess = false;
-
-    try {
-      const token = await getAccessToken();
-      if (token && sheetId) {
-        await syncSubmissionsToSheet(sheetId, token, {
-          classId: assignedClass,
-          subjectName: selectedSubject,
-          date: selectedDate,
-          leaderName: currentUser.displayName,
-          submissions: submissionsToSave,
-          students
-        });
-        sheetSyncSuccess = true;
-        setLastSheetSyncTime(new Date().toLocaleTimeString('mn-MN', { hour: '2-digit', minute: '2-digit' }));
-      }
-    } catch (sheetErr) {
-      console.warn('Google Sheet рүү синк хийхэд мэдэгдэл:', sheetErr);
+    // 2. Google Sheet рүү автоматаар (дараалалтай, сүлжээ тасарвал дахин оролдоно) хадгалагдана
+    const sheetSyncSuccess = dataService.isSheetsMode();
+    if (sheetSyncSuccess) {
+      void dataService.syncNow().then(r => {
+        if (r.success) setLastSheetSyncTime(new Date().toLocaleTimeString('mn-MN', { hour: '2-digit', minute: '2-digit' }));
+      });
     }
 
     setIsSaving(false);
